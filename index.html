@@ -634,6 +634,39 @@
             transform: translate(-50%, -50%) scale(0.82);
         }
 
+        #loading-indicator {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            z-index: 80;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 14px;
+            pointer-events: none;
+            transform: translate(-50%, -50%);
+            transition: opacity 0.4s ease;
+        }
+        #loading-indicator.is-hidden {
+            opacity: 0;
+        }
+        #loading-spinner {
+            width: 36px;
+            height: 36px;
+            border: 3px solid rgba(111, 244, 255, 0.28);
+            border-top-color: #72ecff;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        #loading-text {
+            color: rgba(200, 247, 255, 0.86);
+            font: 700 14px -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+            letter-spacing: 0.04em;
+        }
+
         @media (max-width: 520px) {
             #ui-layer {
                 top: max(12px, env(safe-area-inset-top));
@@ -722,6 +755,10 @@
     <video id="webcam" autoplay playsinline muted></video>
     <canvas id="canvas"></canvas>
     <div id="hand-pointer"></div>
+    <div id="loading-indicator">
+        <div id="loading-spinner"></div>
+        <span id="loading-text">正在初始化手势识别…</span>
+    </div>
     <div id="ui-layer" aria-live="polite">
         <span id="status-main">张开手掌开始</span>
         <span id="status-sub">摄像头不可用时点击画面开始</span>
@@ -866,6 +903,8 @@
             const statusSub = document.getElementById("status-sub");
             const uiLayer = document.getElementById("ui-layer");
             const pointer = document.getElementById("hand-pointer");
+            const loadingIndicator = document.getElementById("loading-indicator");
+            const loadingText = document.getElementById("loading-text");
             const photoContainer = document.getElementById("photo-container");
             const photoTools = document.getElementById("photo-tools");
             const photoManagerButton = document.getElementById("photo-manager-button");
@@ -993,6 +1032,9 @@
                 sinY: 0
             };
 
+            // ═══════════════════════════════════════
+            // 工具函数
+            // ═══════════════════════════════════════
             const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
             const lerp = (a, b, t) => a + (b - a) * t;
             const distance3D = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, (a.z || 0) - (b.z || 0));
@@ -1046,6 +1088,9 @@
                 osc.stop(now + duration + 0.02);
             }
 
+            // ═══════════════════════════════════════
+            // 照片配置与DOM管理
+            // ═══════════════════════════════════════
             function updatePhotoCount() {
                 photoCount.textContent = `${photoCards.length} 张`;
             }
@@ -1138,11 +1183,13 @@
                     document.body.classList.remove("demo-mode");
                     demoToggle.textContent = "演示";
                     updateShapeLabel();
+                    invalidateBlessingCache();
 
                     photoContainer.innerHTML = "";
                     data.photos.forEach(photo => {
                         if (photo.src) photoContainer.appendChild(createPhotoCard(photo));
                     });
+                    refreshPhotoCards();
                 } catch (error) {
                     localStorage.removeItem(STORAGE_KEY);
                 }
@@ -1320,6 +1367,7 @@
                 blessingInput.value = blessingText;
                 soundToggle.checked = soundEnabled;
                 updateShapeLabel();
+                invalidateBlessingCache();
 
                 photoContainer.innerHTML = "";
                 data.photos.forEach(photo => {
@@ -1489,6 +1537,7 @@
                 greetingInput2.value = greetingLine2;
                 blessingInput.value = blessingText;
                 soundEnabled = soundToggle.checked;
+                invalidateBlessingCache();
                 playTone("apply");
                 saveConfig();
                 if (currentState === STATE.CAKE) {
@@ -1498,13 +1547,19 @@
                 }
             }
 
+            let cachedBlessingMessages = null;
+            function invalidateBlessingCache() {
+                cachedBlessingMessages = null;
+            }
             function getBlessingMessages() {
+                if (cachedBlessingMessages) return cachedBlessingMessages;
                 const lines = blessingText
                     .split(/\n+/)
                     .map(line => line.trim())
                     .filter(Boolean)
                     .slice(0, 6);
-                return [greetingLine1, greetingLine2].concat(lines).filter(Boolean);
+                cachedBlessingMessages = [greetingLine1, greetingLine2].concat(lines).filter(Boolean);
+                return cachedBlessingMessages;
             }
 
             function roundedRectPath(targetCtx, x, y, w, h, r) {
@@ -1555,91 +1610,9 @@
                 pctx.restore();
             }
 
-            function exportPoster() {
-                const poster = document.createElement("canvas");
-                poster.width = 1600;
-                poster.height = 2400;
-                const pctx = poster.getContext("2d");
-                const bg = pctx.createLinearGradient(0, 0, 1600, 2400);
-                bg.addColorStop(0, "#030817");
-                bg.addColorStop(0.45, "#091132");
-                bg.addColorStop(1, "#02030a");
-                pctx.fillStyle = bg;
-                pctx.fillRect(0, 0, 1600, 2400);
-
-                for (let i = 0; i < 360; i++) {
-                    const x = Math.random() * 1600;
-                    const y = Math.random() * 2400;
-                    const a = Math.random() * 0.55 + 0.18;
-                    pctx.fillStyle = `rgba(255,255,255,${a})`;
-                    pctx.beginPath();
-                    pctx.arc(x, y, Math.random() * 2.2 + 0.6, 0, Math.PI * 2);
-                    pctx.fill();
-                }
-
-                const glow = pctx.createRadialGradient(800, 1040, 0, 800, 1040, 760);
-                glow.addColorStop(0, "rgba(91, 247, 255, 0.32)");
-                glow.addColorStop(0.36, "rgba(59, 104, 255, 0.18)");
-                glow.addColorStop(1, "rgba(0, 0, 0, 0)");
-                pctx.fillStyle = glow;
-                pctx.fillRect(0, 240, 1600, 1440);
-
-                pctx.textAlign = "center";
-                pctx.fillStyle = "#efffff";
-                pctx.shadowBlur = 30;
-                pctx.shadowColor = "rgba(106, 248, 255, 0.78)";
-                pctx.font = "900 124px Microsoft YaHei, PingFang SC, sans-serif";
-                pctx.fillText(greetingLine1 || "生日快乐", 800, 220);
-                pctx.font = "800 58px Microsoft YaHei, PingFang SC, sans-serif";
-                pctx.fillStyle = "rgba(211, 255, 255, 0.9)";
-                pctx.fillText(greetingLine2 || "祝你开心", 800, 310);
-                pctx.shadowBlur = 0;
-
-                const featured = photoCards.filter(card => card.dataset.featured === "true");
-                const chosen = (featured.length ? featured.concat(photoCards) : photoCards).slice(0, 12);
-                const centerX = 800;
-                const centerY = 1040;
-                chosen.forEach((card, index) => {
-                    const angle = -Math.PI / 2 + index * Math.PI * 2 / Math.max(1, chosen.length);
-                    const ring = index % 3 === 0 ? 430 : 330;
-                    const w = index % 3 === 0 ? 170 : 138;
-                    const h = w * 1.35;
-                    drawPosterPhoto(pctx, card, centerX + Math.cos(angle) * ring - w / 2, centerY + Math.sin(angle) * ring * 0.72 - h / 2, w, h, Math.sin(angle) * 0.18);
-                });
-
-                pctx.save();
-                pctx.strokeStyle = "rgba(120, 250, 255, 0.34)";
-                pctx.lineWidth = 5;
-                pctx.setLineDash([18, 22]);
-                pctx.beginPath();
-                pctx.ellipse(centerX, centerY, 470, 325, 0, 0, Math.PI * 2);
-                pctx.stroke();
-                pctx.restore();
-
-                pctx.fillStyle = "rgba(255,255,255,0.96)";
-                pctx.font = "900 68px Microsoft YaHei, PingFang SC, sans-serif";
-                pctx.fillText(currentShape().label + " · 回忆宇宙", 800, 1710);
-                pctx.font = "700 38px Microsoft YaHei, PingFang SC, sans-serif";
-                pctx.fillStyle = "rgba(220, 255, 255, 0.82)";
-                getBlessingMessages().slice(2, 5).forEach((line, index) => {
-                    pctx.fillText(line, 800, 1800 + index * 66);
-                });
-                pctx.fillStyle = "rgba(156, 236, 255, 0.68)";
-                pctx.font = "700 30px Microsoft YaHei, sans-serif";
-                pctx.fillText(new Date().toLocaleDateString("zh-CN"), 800, 2220);
-
-                poster.toBlob(blob => {
-                    if (!blob) return;
-                    const link = document.createElement("a");
-                    link.href = URL.createObjectURL(blob);
-                    link.download = "birthday-memory-poster.png";
-                    link.click();
-                    URL.revokeObjectURL(link.href);
-                }, "image/png");
-                setStatus("纪念海报已生成", "如果使用上传照片，海报会包含照片缩略图");
-                playTone("apply");
-            }
-
+            // ═══════════════════════════════════════
+            // 海报渲染系统
+            // ═══════════════════════════════════════
             function posterPalette(style) {
                 const palettes = {
                     blue: {
@@ -1869,7 +1842,7 @@
                 await renderPosterCanvas(posterPreviewCanvas, false);
             }
 
-            function exportPoster() {
+            function openPosterPanel() {
                 posterTitleInput.value = posterTitleInput.value || greetingLine1 || "生日快乐";
                 posterPanel.classList.add("is-open");
                 posterPanel.setAttribute("aria-hidden", "false");
@@ -2043,6 +2016,9 @@
                 };
             }
 
+            // ═══════════════════════════════════════
+            // 3D投影与旋转（手写软渲染）
+            // ═══════════════════════════════════════
             function projectPoint(x, y, z) {
                 const denominator = Math.max(160, FOV + CAMERA_DIST - z);
                 const scale = FOV / denominator;
@@ -2053,6 +2029,9 @@
                 };
             }
 
+            // ═══════════════════════════════════════
+            // 粒子系统
+            // ═══════════════════════════════════════
             class QuantumParticle3D {
                 constructor(target, type = "normal", options = {}) {
                     this.x = options.x ?? (Math.random() * viewW - viewW / 2);
@@ -2116,6 +2095,9 @@
                 }
             }
 
+            // ═══════════════════════════════════════
+            // 场景构建：文字/蛋糕/星球/烟花
+            // ═══════════════════════════════════════
             function getExtrudedText3DPoints(text, size = 110, zDepth = 24, yOffset = 0, xOffset = 0) {
                 sampleCtx.setTransform(1, 0, 0, 1, 0, 0);
                 sampleCtx.clearRect(0, 0, viewW, viewH);
@@ -2431,6 +2413,9 @@
                 hideFloatingPhotoCaption();
             }
 
+            // ═══════════════════════════════════════
+            // 手势识别与状态转换
+            // ═══════════════════════════════════════
             function handleGesture(openFingers, fingerOpen, palmSize) {
                 const now = performance.now();
                 openFrames = openFingers >= 4 ? openFrames + 1 : 0;
@@ -2485,29 +2470,6 @@
                 const projected = projectPoint(rotated.x, rotated.y, rotated.z);
                 projected.y += globeYOffset();
                 return { rotated, projected };
-            }
-
-            function pickPhotoAtPointer(loose = false) {
-                const radius = currentSphereRadius();
-                const rotY = angleY + performance.now() * 0.00022;
-                const rotX = angleX;
-                let pickedIndex = -1;
-                let bestScore = Infinity;
-
-                photoCards.forEach((card, i) => {
-                    const slot = getPhotoSlot(i, photoCards.length, radius, rotX, rotY);
-                    const depth = clamp((slot.rotated.z + radius) / (radius * 2), 0, 1);
-                    if (depth < (loose ? 0.12 : 0.18)) return;
-                    const d = Math.hypot(slot.projected.x - handX * viewW, slot.projected.y - handY * viewH);
-                    const hitRadius = (loose ? Math.max(190, card.offsetWidth * 3.4) : Math.max(118, card.offsetWidth * 2.55)) * (0.72 + depth * 0.42);
-                    const score = d - depth * (loose ? 110 : 54);
-                    if (d < hitRadius && score < bestScore) {
-                        bestScore = score;
-                        pickedIndex = i;
-                    }
-                });
-
-                return pickedIndex;
             }
 
             function timelineRank(index) {
@@ -2713,6 +2675,7 @@
 
             async function startCameraTracking() {
                 if (!window.Hands || !window.Camera) {
+                    loadingIndicator.classList.add("is-hidden");
                     setStatus("点击画面开始", "手势组件未加载，已切换为鼠标控制");
                     return;
                 }
@@ -2750,8 +2713,10 @@
                     });
 
                     await camera.start();
+                    loadingIndicator.classList.add("is-hidden");
                     setStatus("张开手掌开始", "保持张开片刻，或点击画面使用鼠标控制");
                 } catch (error) {
+                    loadingIndicator.classList.add("is-hidden");
                     setStatus("点击画面开始", "摄像头不可用，已切换为鼠标控制");
                 }
             }
@@ -2893,7 +2858,7 @@
 
                 posterButton.addEventListener("click", event => {
                     event.stopPropagation();
-                    exportPoster();
+                    openPosterPanel();
                 });
 
                 posterPanel.addEventListener("pointerdown", event => {
@@ -3144,6 +3109,9 @@
                 ctx.globalAlpha = 1;
             }
 
+            // ═══════════════════════════════════════
+            // 主渲染循环
+            // ═══════════════════════════════════════
             function animate(now) {
                 if (lastFrameAt) {
                     const delta = now - lastFrameAt;
